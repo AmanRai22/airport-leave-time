@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BLR Airport — Leave Time Calculator</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #161922;
+    --card-2: #1d212c;
+    --border: #262b38;
+    --text: #e7eaf0;
+    --muted: #8b94a7;
+    --accent: #5b8cff;
+    --accent-2: #7aa7ff;
+    --good: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: radial-gradient(1200px 600px at 10% -10%, #1a2138 0%, transparent 60%),
+                radial-gradient(900px 500px at 110% 10%, #1a2a2a 0%, transparent 55%),
+                var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px 20px 80px;
+  }
+  header h1 {
+    font-size: 28px;
+    margin: 0 0 6px;
+    letter-spacing: -0.02em;
+  }
+  header p {
+    margin: 0 0 28px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 18px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  input[type="number"], select {
+    background: var(--card-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 14px;
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+    transition: border-color .15s ease;
+    min-width: 0;
+  }
+  input[type="number"]:focus, select:focus {
+    border-color: var(--accent);
+  }
+  input.hh, input.mm {
+    width: 80px;
+    text-align: center;
+  }
+  select.ampm {
+    width: 84px;
+  }
+  button {
+    background: linear-gradient(180deg, var(--accent), #4674e6);
+    color: white;
+    border: 0;
+    border-radius: 10px;
+    padding: 14px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .04s ease, filter .15s ease;
+  }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: translateY(1px); }
+  .calc-btn { width: 100%; margin-top: 14px; padding: 16px; font-size: 16px; }
+
+  .result {
+    display: none;
+  }
+  .result.show { display: block; }
+  .leave-block {
+    text-align: center;
+    padding: 22px 16px 18px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(91,140,255,0.18), rgba(91,140,255,0.04));
+    border: 1px solid rgba(91,140,255,0.35);
+    margin-bottom: 18px;
+  }
+  .leave-block .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent-2);
+    margin-bottom: 6px;
+  }
+  .leave-block .time {
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .leave-block .sub {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 12px;
+    align-items: baseline;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .name { font-size: 14px; }
+  .row .desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .row .time { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--text); }
+  .row .delta { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); min-width: 64px; text-align: right; }
+
+  .pill {
+    display: inline-block;
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: 999px;
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-left: 8px;
+  }
+  .pill.good { color: var(--good); border-color: rgba(74,222,128,0.3); }
+  .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.3); }
+
+  .footer-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    line-height: 1.55;
+  }
+  .footer-note a { color: var(--accent-2); text-decoration: none; }
+  .footer-note a:hover { text-decoration: underline; }
+
+  .err {
+    color: var(--bad);
+    font-size: 13px;
+    margin-top: 10px;
+  }
+
+  details {
+    margin-top: 16px;
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  details summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+    user-select: none;
+  }
+  details[open] summary { color: var(--text); margin-bottom: 8px; }
+  details ul { margin: 6px 0 0 18px; padding: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>BLR Airport — Leave Time Calculator</h1>
+      <p>From DRXFIT (HSR), Bengaluru → Kempegowda Intl. Airport (BLR)</p>
+    </header>
+
+    <div class="card">
+      <label for="hh">Flight departure time</label>
+      <div class="input-row">
+        <input id="hh" class="hh" type="number" inputmode="numeric" min="1" max="12" placeholder="HH" />
+        <input id="mm" class="mm" type="number" inputmode="numeric" min="0" max="59" placeholder="MM" />
+        <select id="ampm" class="ampm">
+          <option value="AM">AM</option>
+          <option value="PM" selected>PM</option>
+        </select>
+      </div>
+      <button id="calc" class="calc-btn">Calculate leave time</button>
+      <div id="err" class="err"></div>
+    </div>
+
+    <div id="result" class="result">
+      <div class="card">
+        <div class="leave-block">
+          <div class="label">Leave home by</div>
+          <div class="time" id="leaveTime">—</div>
+          <div class="sub" id="leaveSub"></div>
+        </div>
+
+        <div id="rows"></div>
+
+        <details>
+          <summary>How this is calculated</summary>
+          <ul>
+            <li><b>Cab booking buffer:</b> 15 min — book the ride before you actually want to leave.</li>
+            <li><b>Travel time:</b> estimated for HSR → BLR via ORR / Hebbal, varies by departure hour (Bengaluru traffic patterns).</li>
+            <li><b>Security check:</b> 30 min at BLR T1/T2.</li>
+            <li><b>Gate close:</b> gates close 30 min before departure; aim to be there 20 min before close → at gate 50 min before flight.</li>
+          </ul>
+        </details>
+
+        <p class="footer-note">
+          Travel time is a heuristic based on time-of-day. For live traffic check
+          <a id="mapsLink" target="_blank" rel="noreferrer">Google Maps directions</a>
+          and adjust if it deviates by &gt; 15 min.
+        </p>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // Home: DRXFIT (HSR area), BLR airport
+  const HOME = { lat: 12.9264946, lng: 77.6382594 };
+  const AIRPORT = { lat: 13.1986, lng: 77.7066 };
+
+  // Travel time (minutes) by departure hour from HSR -> BLR airport.
+  // Calibrated to typical Bengaluru traffic on the ORR -> Hebbal -> NH44 route.
+  // Index = hour of day at moment of leaving home (0..23).
+  const TRAVEL_BY_HOUR = [
+    50, 50, 50, 50,   // 00–03 — very light
+    55, 60, 65, 80,   // 04–07 — getting heavier
+    95, 100, 95, 85,  // 08–11 — morning peak / tail
+    80, 80, 85, 90,   // 12–15 — afternoon
+    100, 115, 120, 110, // 16–19 — evening peak
+    90, 75, 65, 55    // 20–23 — winding down
+  ];
+
+  function travelMinutesAt(date) {
+    const h = date.getHours();
+    const m = date.getMinutes();
+    const base = TRAVEL_BY_HOUR[h];
+    const next = TRAVEL_BY_HOUR[(h + 1) % 24];
+    // Linear interp within the hour for smoother values.
+    return Math.round(base + (next - base) * (m / 60));
+  }
+
+  function fmtTime(d) {
+    let h = d.getHours();
+    const m = d.getMinutes();
+    const ap = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return `${h}:${String(m).padStart(2,"0")} ${ap}`;
+  }
+
+  function fmtDayHint(leave, flight) {
+    // If leave is on the day before the flight (i.e. flight is early next day after midnight),
+    // hint that.
+    const sameDay = leave.toDateString() === flight.toDateString();
+    return sameDay ? "" : "(previous evening / overnight)";
+  }
+
+  function parseFlight() {
+    const hh = parseInt(document.getElementById("hh").value, 10);
+    const mm = parseInt(document.getElementById("mm").value, 10);
+    const ap = document.getElementById("ampm").value;
+    if (!Number.isFinite(hh) || hh < 1 || hh > 12) throw new Error("Enter hour 1–12.");
+    if (!Number.isFinite(mm) || mm < 0 || mm > 59) throw new Error("Enter minutes 0–59.");
+    let h24 = hh % 12;
+    if (ap === "PM") h24 += 12;
+    // Anchor the flight time to today; if it's already passed today, push to tomorrow.
+    const now = new Date();
+    const flight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h24, mm, 0, 0);
+    if (flight.getTime() <= now.getTime()) flight.setDate(flight.getDate() + 1);
+    return flight;
+  }
+
+  function calculate() {
+    const errEl = document.getElementById("err");
+    errEl.textContent = "";
+    let flight;
+    try { flight = parseFlight(); }
+    catch (e) { errEl.textContent = e.message; return; }
+
+    // Work backwards from flight time.
+    // 1) At gate: 50 min before flight (gate closes 30 before; want to be there 20 before close).
+    const atGate = new Date(flight.getTime() - 50 * 60 * 1000);
+    // 2) Through security ~30 min before at-gate -> arrive at airport entrance.
+    const atAirport = new Date(atGate.getTime() - 30 * 60 * 1000);
+    // 3) Travel time depends on leave time -> iterate to converge.
+    let leave = new Date(atAirport.getTime() - 80 * 60 * 1000); // initial guess 80 min
+    for (let i = 0; i < 5; i++) {
+      const tt = travelMinutesAt(leave);
+      leave = new Date(atAirport.getTime() - tt * 60 * 1000);
+    }
+    const travelMin = travelMinutesAt(leave);
+    // 4) Book cab 15 min before leaving home.
+    const bookCab = new Date(leave.getTime() - 15 * 60 * 1000);
+
+    // Render
+    document.getElementById("leaveTime").textContent = fmtTime(leave);
+    document.getElementById("leaveSub").textContent =
+      `for a ${fmtTime(flight)} flight ${fmtDayHint(leave, flight)}`.trim();
+
+    const rows = [
+      {
+        name: "Book cab",
+        desc: "15 min buffer to actually pull up",
+        time: fmtTime(bookCab),
+        delta: "−15 min",
+      },
+      {
+        name: "Leave home",
+        desc: "DRXFIT, HSR area",
+        time: fmtTime(leave),
+        delta: "0",
+        highlight: true,
+      },
+      {
+        name: "Arrive at airport",
+        desc: `≈ ${travelMin} min drive (time-of-day estimate)`,
+        time: fmtTime(atAirport),
+        delta: `+${travelMin} min`,
+      },
+      {
+        name: "Through security",
+        desc: "30 min for check-in + security",
+        time: fmtTime(atGate),
+        delta: "+30 min",
+      },
+      {
+        name: "At gate (comfortable)",
+        desc: "20 min before gate closes",
+        time: fmtTime(atGate),
+        delta: "+0",
+      },
+      {
+        name: "Gate closes",
+        desc: "30 min before departure",
+        time: fmtTime(new Date(flight.getTime() - 30*60*1000)),
+        delta: "+30 min",
+      },
+      {
+        name: "Flight departs",
+        desc: "wheels up",
+        time: fmtTime(flight),
+        delta: "—",
+      },
+    ];
+
+    const rowsEl = document.getElementById("rows");
+    rowsEl.innerHTML = "";
+    rows.forEach(r => {
+      const div = document.createElement("div");
+      div.className = "row";
+      div.innerHTML = `
+        <div>
+          <div class="name">${r.name}${r.highlight ? '<span class="pill good">leave</span>' : ""}</div>
+          <div class="desc">${r.desc}</div>
+        </div>
+        <div class="time">${r.time}</div>
+        <div class="delta">${r.delta}</div>
+      `;
+      rowsEl.appendChild(div);
+    });
+
+    const mapsHref = `https://www.google.com/maps/dir/?api=1&origin=${HOME.lat},${HOME.lng}&destination=${AIRPORT.lat},${AIRPORT.lng}&travelmode=driving`;
+    document.getElementById("mapsLink").href = mapsHref;
+
+    document.getElementById("result").classList.add("show");
+  }
+
+  document.getElementById("calc").addEventListener("click", calculate);
+  ["hh","mm","ampm"].forEach(id => {
+    document.getElementById(id).addEventListener("keydown", e => {
+      if (e.key === "Enter") calculate();
+    });
+  });
+
+  // Prefill nice defaults
+  document.getElementById("hh").value = 6;
+  document.getElementById("mm").value = 30;
+  document.getElementById("ampm").value = "AM";
+</script>
+</body>
+</html>
