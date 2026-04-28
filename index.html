@@ -269,7 +269,7 @@
         <div id="rows"></div>
 
         <div class="toggle-row">
-          <span class="tlabel"><b>Tight mode</b> — security 20 min, no gate cushion</span>
+          <span class="tlabel"><b>Tight mode</b> — cab 5m · security 20m · gate cushion 5m</span>
           <label class="toggle">
             <input type="checkbox" id="stripToggle" />
             <div class="toggle-track"></div>
@@ -375,8 +375,9 @@
 
   function render(flight, stripped) {
     // Variable durations — only these change between modes.
-    const securityMin = stripped ? 20 : 30;  // security queue buffer trimmed
-    const cushionMin  = stripped ? 0  : 20;  // gate-close cushion removed
+    const cabLeadMin  = stripped ? 5  : 15; // book-cab → leave-home gap
+    const securityMin = stripped ? 20 : 30; // security queue buffer trimmed
+    const cushionMin  = stripped ? 5  : 20; // gate-close cushion
 
     const gateClose = new Date(flight.getTime() - 30 * 60000);
     const atGate    = new Date(gateClose.getTime() - cushionMin * 60000);
@@ -394,7 +395,7 @@
 
     // ── Derived times ──────────────────────────────────────────────────────────
     const atAirport = new Date(leave.getTime() + travelMin * 60000);
-    const bookCab   = new Date(leave.getTime() - 15 * 60000);
+    const bookCab   = new Date(leave.getTime() - cabLeadMin * 60000);
 
     // ── Hero block ─────────────────────────────────────────────────────────────
     const sameDayHint = leave.toDateString() !== flight.toDateString() ? " (night before)" : "";
@@ -411,9 +412,11 @@
     const rows = [
       {
         name:   "Book cab",
-        desc:   "Uber/Ola — book 15 min before you want to leave",
+        desc:   stripped
+          ? "Uber/Ola — book 5 min before leaving (tight)"
+          : "Uber/Ola — book 15 min before you want to leave",
         time:   fmtTime(bookCab),
-        delta:  "−15 min",
+        delta:  `−${cabLeadMin} min`,
       },
       {
         name:      "Leave home",
@@ -441,11 +444,11 @@
       {
         name:  "Gate closes",
         desc:  stripped
-          ? "no cushion — you arrive exactly as the gate closes"
+          ? "5 min cushion before gate close — cutting it fine"
           : "30 min before departure — you arrive 20 min before this",
         time:  fmtTime(gateClose),
         delta: `+${cushionMin} min`,
-        badge: stripped ? { label: "no cushion", level: "bad" } : null,
+        badge: stripped ? { label: "5 min cushion", level: "warn" } : null,
       },
       {
         name:  "Flight departs",
