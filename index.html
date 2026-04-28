@@ -155,8 +155,10 @@
     color: var(--muted);
     margin-left: 8px;
   }
-  .pill.good { color: var(--good); border-color: rgba(74,222,128,0.3); }
-  .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.3); }
+  .pill.good { color: var(--good); border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.06); }
+  .pill.ok   { color: #60d4f5;    border-color: rgba(96,212,245,0.3);  background: rgba(96,212,245,0.06); }
+  .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.06); }
+  .pill.bad  { color: var(--bad);  border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.06); }
 
   .footer-note {
     font-size: 12px;
@@ -224,10 +226,10 @@
         <details>
           <summary>How this is calculated</summary>
           <ul>
-            <li><b>Cab booking buffer:</b> 15 min — book the ride before you actually want to leave.</li>
-            <li><b>Travel time:</b> estimated for HSR → BLR via ORR / Hebbal, varies by departure hour (Bengaluru traffic patterns).</li>
-            <li><b>Security check:</b> 30 min at BLR T1/T2.</li>
-            <li><b>Gate close:</b> gates close 30 min before departure; aim to be there 20 min before close → at gate 50 min before flight.</li>
+            <li><b>Cab booking buffer:</b> 15 min — book before you want to leave so the cab is waiting, not you.</li>
+            <li><b>Travel time:</b> estimated for HSR → BLR via ORR → Hebbal → NH44 using a 30-minute-slot traffic model calibrated to typical Bengaluru weekday patterns. Crucially, the estimate uses the hour <em>you'll actually be on the road</em> — not when you opened the app — so an evening flight correctly gets peak-hour traffic even if you're planning in the morning.</li>
+            <li><b>Security:</b> 30 min covers check-in kiosk + security queue at BLR T1/T2.</li>
+            <li><b>Gate buffer:</b> gates close 30 min before departure; the app targets arrival 20 min before gate close → 50 min before flight total.</li>
           </ul>
         </details>
 
@@ -241,44 +243,64 @@
   </div>
 
 <script>
-  // Home: DRXFIT (HSR area), BLR airport
-  const HOME = { lat: 12.9264946, lng: 77.6382594 };
-  const AIRPORT = { lat: 13.1986, lng: 77.7066 };
+  const HOME    = { lat: 12.9264946, lng: 77.6382594 };
+  const AIRPORT = { lat: 13.1986,    lng: 77.7066    };
 
-  // Travel time (minutes) by departure hour from HSR -> BLR airport.
-  // Calibrated to typical Bengaluru traffic on the ORR -> Hebbal -> NH44 route.
-  // Index = hour of day at moment of leaving home (0..23).
-  const TRAVEL_BY_HOUR = [
-    50, 50, 50, 50,   // 00–03 — very light
-    55, 60, 65, 80,   // 04–07 — getting heavier
-    95, 100, 95, 85,  // 08–11 — morning peak / tail
-    80, 80, 85, 90,   // 12–15 — afternoon
-    100, 115, 120, 110, // 16–19 — evening peak
-    90, 75, 65, 55    // 20–23 — winding down
+  // 48 slots of 30 min each — index 0 = 00:00, 1 = 00:30, ... 47 = 23:30
+  // HSR/Koramangala → BLR via Outer Ring Road → Hebbal → NH44.
+  // Calibrated against typical weekday patterns; accounts for building/easing of peak.
+  const SLOTS = [
+    50, 50,  // 00:00–00:30
+    50, 50,  // 01:00–01:30
+    50, 50,  // 02:00–02:30
+    50, 52,  // 03:00–03:30
+    54, 56,  // 04:00–04:30
+    59, 63,  // 05:00–05:30
+    66, 74,  // 06:00–06:30
+    82, 92,  // 07:00–07:30
+    97,102,  // 08:00–08:30
+   104,101,  // 09:00–09:30
+    96, 90,  // 10:00–10:30
+    86, 82,  // 11:00–11:30
+    80, 79,  // 12:00–12:30
+    78, 78,  // 13:00–13:30
+    80, 83,  // 14:00–14:30
+    88, 95,  // 15:00–15:30
+   103,111,  // 16:00–16:30
+   117,122,  // 17:00–17:30
+   124,121,  // 18:00–18:30
+   116,109,  // 19:00–19:30
+   101, 94,  // 20:00–20:30
+    88, 82,  // 21:00–21:30
+    76, 69,  // 22:00–22:30
+    63, 56,  // 23:00–23:30
   ];
 
-  function travelMinutesAt(date) {
-    const h = date.getHours();
-    const m = date.getMinutes();
-    const base = TRAVEL_BY_HOUR[h];
-    const next = TRAVEL_BY_HOUR[(h + 1) % 24];
-    // Linear interp within the hour for smoother values.
-    return Math.round(base + (next - base) * (m / 60));
+  function trafficAt(date) {
+    const h = date.getHours(), m = date.getMinutes();
+    const si = h * 2 + (m >= 30 ? 1 : 0);
+    const ni = (si + 1) % 48;
+    const frac = (m % 30) / 30;
+    const minutes = Math.round(SLOTS[si] + (SLOTS[ni] - SLOTS[si]) * frac);
+
+    // Named period takes priority; otherwise bucket by duration.
+    const t = h + m / 60;
+    let label, level;
+    if      (t >= 7.5  && t < 10.5) { label = "Morning rush";   level = "warn"; }
+    else if (t >= 16   && t < 20.5) { label = "Evening peak";   level = "bad";  }
+    else if (minutes <= 58)          { label = "Light traffic";  level = "good"; }
+    else if (minutes <= 82)          { label = "Moderate";       level = "ok";   }
+    else if (minutes <= 100)         { label = "Heavy traffic";  level = "warn"; }
+    else                             { label = "Peak traffic";   level = "bad";  }
+
+    return { minutes, label, level };
   }
 
   function fmtTime(d) {
-    let h = d.getHours();
-    const m = d.getMinutes();
+    let h = d.getHours(); const m = d.getMinutes();
     const ap = h >= 12 ? "PM" : "AM";
-    h = h % 12; if (h === 0) h = 12;
-    return `${h}:${String(m).padStart(2,"0")} ${ap}`;
-  }
-
-  function fmtDayHint(leave, flight) {
-    // If leave is on the day before the flight (i.e. flight is early next day after midnight),
-    // hint that.
-    const sameDay = leave.toDateString() === flight.toDateString();
-    return sameDay ? "" : "(previous evening / overnight)";
+    h = h % 12; if (!h) h = 12;
+    return `${h}:${String(m).padStart(2, "0")} ${ap}`;
   }
 
   function parseFlight() {
@@ -286,13 +308,12 @@
     const mm = parseInt(document.getElementById("mm").value, 10);
     const ap = document.getElementById("ampm").value;
     if (!Number.isFinite(hh) || hh < 1 || hh > 12) throw new Error("Enter hour 1–12.");
-    if (!Number.isFinite(mm) || mm < 0 || mm > 59) throw new Error("Enter minutes 0–59.");
+    if (!Number.isFinite(mm) || mm < 0  || mm > 59) throw new Error("Enter minutes 0–59.");
     let h24 = hh % 12;
     if (ap === "PM") h24 += 12;
-    // Anchor the flight time to today; if it's already passed today, push to tomorrow.
     const now = new Date();
     const flight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h24, mm, 0, 0);
-    if (flight.getTime() <= now.getTime()) flight.setDate(flight.getDate() + 1);
+    if (flight <= now) flight.setDate(flight.getDate() + 1);
     return flight;
   }
 
@@ -300,83 +321,87 @@
     const errEl = document.getElementById("err");
     errEl.textContent = "";
     let flight;
-    try { flight = parseFlight(); }
-    catch (e) { errEl.textContent = e.message; return; }
+    try { flight = parseFlight(); } catch (e) { errEl.textContent = e.message; return; }
 
-    // Work backwards from flight time.
-    // 1) At gate: 50 min before flight (gate closes 30 before; want to be there 20 before close).
-    const atGate = new Date(flight.getTime() - 50 * 60 * 1000);
-    // 2) Through security ~30 min before at-gate -> arrive at airport entrance.
-    const atAirport = new Date(atGate.getTime() - 30 * 60 * 1000);
-    // 3) Travel time depends on leave time -> iterate to converge.
-    let leave = new Date(atAirport.getTime() - 80 * 60 * 1000); // initial guess 80 min
-    for (let i = 0; i < 5; i++) {
-      const tt = travelMinutesAt(leave);
-      leave = new Date(atAirport.getTime() - tt * 60 * 1000);
+    // ── Fixed buffers ──────────────────────────────────────────────────────────
+    // Gate closes 30 min before departure; be there 20 min before close → 50 min early.
+    const atGate    = new Date(flight.getTime()   - 50 * 60000);
+    const atAirport = new Date(atGate.getTime()   - 30 * 60000); // security + check-in
+    const gateClose = new Date(flight.getTime()   - 30 * 60000);
+
+    // ── Converge on travel time ────────────────────────────────────────────────
+    // Travel time depends on the hour you actually leave, not the hour you open the app.
+    // Iterate: start with a rough guess, recompute leave time using that duration, repeat.
+    let leave = new Date(atAirport.getTime() - 90 * 60000);
+    for (let i = 0; i < 8; i++) {
+      const { minutes } = trafficAt(leave);
+      leave = new Date(atAirport.getTime() - minutes * 60000);
     }
-    const travelMin = travelMinutesAt(leave);
-    // 4) Book cab 15 min before leaving home.
-    const bookCab = new Date(leave.getTime() - 15 * 60 * 1000);
+    const { minutes: travelMin, label: trafLabel, level: trafLevel } = trafficAt(leave);
 
-    // Render
+    // ── Cab booking ────────────────────────────────────────────────────────────
+    const bookCab = new Date(leave.getTime() - 15 * 60000);
+
+    // ── Render ─────────────────────────────────────────────────────────────────
+    const sameDayHint = leave.toDateString() !== flight.toDateString()
+      ? " (night before)" : "";
     document.getElementById("leaveTime").textContent = fmtTime(leave);
-    document.getElementById("leaveSub").textContent =
-      `for a ${fmtTime(flight)} flight ${fmtDayHint(leave, flight)}`.trim();
+    document.getElementById("leaveSub").textContent  =
+      `for your ${fmtTime(flight)} flight${sameDayHint}`;
 
     const rows = [
       {
-        name: "Book cab",
-        desc: "15 min buffer to actually pull up",
-        time: fmtTime(bookCab),
+        name:  "Book cab",
+        desc:  "15 min buffer for the cab to arrive",
+        time:  fmtTime(bookCab),
         delta: "−15 min",
       },
       {
-        name: "Leave home",
-        desc: "DRXFIT, HSR area",
-        time: fmtTime(leave),
-        delta: "0",
+        name:      "Leave home",
+        desc:      "DRXFIT, HSR Layout",
+        time:      fmtTime(leave),
+        delta:     "—",
         highlight: true,
       },
       {
-        name: "Arrive at airport",
-        desc: `≈ ${travelMin} min drive (time-of-day estimate)`,
-        time: fmtTime(atAirport),
+        name:  "Arrive at airport",
+        desc:  `${travelMin} min drive · estimated for <b>${trafLabel.toLowerCase()}</b> at ${fmtTime(leave)}`,
+        time:  fmtTime(atAirport),
         delta: `+${travelMin} min`,
+        badge: { label: trafLabel, level: trafLevel },
       },
       {
-        name: "Through security",
-        desc: "30 min for check-in + security",
-        time: fmtTime(atGate),
+        name:  "Clear security",
+        desc:  "check-in + security queue at BLR T1/T2",
+        time:  fmtTime(atGate),
         delta: "+30 min",
       },
       {
-        name: "At gate (comfortable)",
-        desc: "20 min before gate closes",
-        time: fmtTime(atGate),
-        delta: "+0",
+        name:  "Gate closes",
+        desc:  "30 min before departure — you arrive 20 min before this",
+        time:  fmtTime(gateClose),
+        delta: "+20 min",
       },
       {
-        name: "Gate closes",
-        desc: "30 min before departure",
-        time: fmtTime(new Date(flight.getTime() - 30*60*1000)),
+        name:  "Flight departs",
+        desc:  "wheels up",
+        time:  fmtTime(flight),
         delta: "+30 min",
-      },
-      {
-        name: "Flight departs",
-        desc: "wheels up",
-        time: fmtTime(flight),
-        delta: "—",
       },
     ];
 
     const rowsEl = document.getElementById("rows");
     rowsEl.innerHTML = "";
     rows.forEach(r => {
+      const badgeHtml = r.badge
+        ? `<span class="pill ${r.badge.level}">${r.badge.label}</span>` : "";
+      const highlightHtml = r.highlight
+        ? `<span class="pill good">leave</span>` : "";
       const div = document.createElement("div");
       div.className = "row";
       div.innerHTML = `
         <div>
-          <div class="name">${r.name}${r.highlight ? '<span class="pill good">leave</span>' : ""}</div>
+          <div class="name">${r.name}${highlightHtml}${badgeHtml}</div>
           <div class="desc">${r.desc}</div>
         </div>
         <div class="time">${r.time}</div>
@@ -385,22 +410,24 @@
       rowsEl.appendChild(div);
     });
 
-    const mapsHref = `https://www.google.com/maps/dir/?api=1&origin=${HOME.lat},${HOME.lng}&destination=${AIRPORT.lat},${AIRPORT.lng}&travelmode=driving`;
+    const mapsHref =
+      `https://www.google.com/maps/dir/?api=1` +
+      `&origin=${HOME.lat},${HOME.lng}` +
+      `&destination=${AIRPORT.lat},${AIRPORT.lng}` +
+      `&travelmode=driving`;
     document.getElementById("mapsLink").href = mapsHref;
-
     document.getElementById("result").classList.add("show");
   }
 
   document.getElementById("calc").addEventListener("click", calculate);
-  ["hh","mm","ampm"].forEach(id => {
+  ["hh", "mm", "ampm"].forEach(id =>
     document.getElementById(id).addEventListener("keydown", e => {
       if (e.key === "Enter") calculate();
-    });
-  });
+    })
+  );
 
-  // Prefill nice defaults
-  document.getElementById("hh").value = 6;
-  document.getElementById("mm").value = 30;
+  document.getElementById("hh").value   = 6;
+  document.getElementById("mm").value   = 30;
   document.getElementById("ampm").value = "AM";
 </script>
 </body>
