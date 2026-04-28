@@ -269,7 +269,7 @@
         <div id="rows"></div>
 
         <div class="toggle-row">
-          <span class="tlabel"><b>Strip all buffers</b> — bare minimum leave time</span>
+          <span class="tlabel"><b>Tight mode</b> — security 20 min, no gate cushion</span>
           <label class="toggle">
             <input type="checkbox" id="stripToggle" />
             <div class="toggle-track"></div>
@@ -374,25 +374,26 @@
   let _flight = null; // cached so the toggle can re-render without re-parsing
 
   function render(flight, stripped) {
+    // Variable durations — only these change between modes.
+    const securityMin = stripped ? 20 : 30;  // security queue buffer trimmed
+    const cushionMin  = stripped ? 0  : 20;  // gate-close cushion removed
+
     const gateClose = new Date(flight.getTime() - 30 * 60000);
+    const atGate    = new Date(gateClose.getTime() - cushionMin * 60000);
+    // Anchor for travel: time you need to be at the airport entrance.
+    const atAirportAnchor = new Date(atGate.getTime() - securityMin * 60000);
 
     // ── Converge on leave time ─────────────────────────────────────────────────
-    // Anchor point depends on mode: with buffers → 50 min before flight;
-    // stripped → exactly at gate close (30 min before flight), no other padding.
-    const anchor = stripped
-      ? gateClose
-      : new Date(flight.getTime() - 50 * 60000 - 30 * 60000); // atGate − security
-
-    let leave = new Date(anchor.getTime() - 90 * 60000);
+    // Travel time depends on the hour you actually leave, not the hour you open the app.
+    let leave = new Date(atAirportAnchor.getTime() - 90 * 60000);
     for (let i = 0; i < 8; i++) {
       const { minutes } = trafficAt(leave);
-      leave = new Date(anchor.getTime() - minutes * 60000);
+      leave = new Date(atAirportAnchor.getTime() - minutes * 60000);
     }
     const { minutes: travelMin, label: trafLabel, level: trafLevel } = trafficAt(leave);
 
-    // ── Derived times (normal mode) ────────────────────────────────────────────
+    // ── Derived times ──────────────────────────────────────────────────────────
     const atAirport = new Date(leave.getTime() + travelMin * 60000);
-    const atGate    = new Date(atAirport.getTime() + (stripped ? 0 : 30 * 60000));
     const bookCab   = new Date(leave.getTime() - 15 * 60000);
 
     // ── Hero block ─────────────────────────────────────────────────────────────
@@ -402,17 +403,17 @@
 
     document.getElementById("leaveTime").textContent = fmtTime(leave);
     document.getElementById("leaveSub").textContent  = stripped
-      ? `bare minimum for your ${fmtTime(flight)} flight${sameDayHint}`
+      ? `tight timing for your ${fmtTime(flight)} flight${sameDayHint}`
       : `for your ${fmtTime(flight)} flight${sameDayHint}`;
 
     // ── Timeline rows ──────────────────────────────────────────────────────────
+    // All steps are kept — only the cushion/security duration shrinks.
     const rows = [
       {
         name:   "Book cab",
-        desc:   "15 min buffer for the cab to arrive",
+        desc:   "Uber/Ola — book 15 min before you want to leave",
         time:   fmtTime(bookCab),
         delta:  "−15 min",
-        ghost:  stripped,   // shown as struck-through when stripped
       },
       {
         name:      "Leave home",
@@ -428,19 +429,23 @@
         delta: `+${travelMin} min`,
         badge: { label: trafLabel, level: trafLevel },
       },
-      ...(!stripped ? [{
-        name:  "Clear security",
-        desc:  "check-in + security queue at BLR T1/T2",
+      {
+        name:  "Through security",
+        desc:  stripped
+          ? "tight: 20 min for check-in + security at BLR"
+          : "30 min for check-in + security queue at BLR T1/T2",
         time:  fmtTime(atGate),
-        delta: "+30 min",
-      }] : []),
+        delta: `+${securityMin} min`,
+        badge: stripped ? { label: "tight", level: "warn" } : null,
+      },
       {
         name:  "Gate closes",
         desc:  stripped
-          ? "arrive exactly here — no cushion"
+          ? "no cushion — you arrive exactly as the gate closes"
           : "30 min before departure — you arrive 20 min before this",
         time:  fmtTime(gateClose),
-        delta: stripped ? "+0 min" : "+20 min",
+        delta: `+${cushionMin} min`,
+        badge: stripped ? { label: "no cushion", level: "bad" } : null,
       },
       {
         name:  "Flight departs",
