@@ -190,6 +190,51 @@
   }
   details[open] summary { color: var(--text); margin-bottom: 8px; }
   details ul { margin: 6px 0 0 18px; padding: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+  /* ── Strip-buffers toggle ───────────────────────────────────────────── */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0 0;
+    margin-top: 14px;
+    border-top: 1px dashed var(--border);
+  }
+  .toggle-row .tlabel { font-size: 13px; color: var(--muted); }
+  .toggle-row .tlabel b { color: var(--text); font-weight: 600; }
+  .toggle {
+    position: relative; display: inline-block;
+    width: 40px; height: 22px; cursor: pointer; flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: var(--card-2); border: 1px solid var(--border);
+    border-radius: 999px; transition: background .2s, border-color .2s;
+  }
+  .toggle input:checked + .toggle-track {
+    background: rgba(251,191,36,.2); border-color: rgba(251,191,36,.5);
+  }
+  .toggle-thumb {
+    position: absolute; top: 3px; left: 3px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--muted); transition: transform .2s, background .2s;
+    pointer-events: none;
+  }
+  .toggle input:checked ~ .toggle-thumb {
+    transform: translateX(18px); background: var(--warn);
+  }
+
+  /* hero block in stripped mode */
+  .leave-block.stripped {
+    background: linear-gradient(180deg, rgba(251,191,36,.12), rgba(251,191,36,.02));
+    border-color: rgba(251,191,36,.35);
+  }
+  .leave-block.stripped .label { color: var(--warn); }
+
+  /* rows that represent removed buffers */
+  .row.ghost { opacity: .32; }
+  .row.ghost .name { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.25); }
 </style>
 </head>
 <body>
@@ -222,6 +267,15 @@
         </div>
 
         <div id="rows"></div>
+
+        <div class="toggle-row">
+          <span class="tlabel"><b>Strip all buffers</b> — bare minimum leave time</span>
+          <label class="toggle">
+            <input type="checkbox" id="stripToggle" />
+            <div class="toggle-track"></div>
+            <div class="toggle-thumb"></div>
+          </label>
+        </div>
 
         <details>
           <summary>How this is calculated</summary>
@@ -317,44 +371,48 @@
     return flight;
   }
 
-  function calculate() {
-    const errEl = document.getElementById("err");
-    errEl.textContent = "";
-    let flight;
-    try { flight = parseFlight(); } catch (e) { errEl.textContent = e.message; return; }
+  let _flight = null; // cached so the toggle can re-render without re-parsing
 
-    // ── Fixed buffers ──────────────────────────────────────────────────────────
-    // Gate closes 30 min before departure; be there 20 min before close → 50 min early.
-    const atGate    = new Date(flight.getTime()   - 50 * 60000);
-    const atAirport = new Date(atGate.getTime()   - 30 * 60000); // security + check-in
-    const gateClose = new Date(flight.getTime()   - 30 * 60000);
+  function render(flight, stripped) {
+    const gateClose = new Date(flight.getTime() - 30 * 60000);
 
-    // ── Converge on travel time ────────────────────────────────────────────────
-    // Travel time depends on the hour you actually leave, not the hour you open the app.
-    // Iterate: start with a rough guess, recompute leave time using that duration, repeat.
-    let leave = new Date(atAirport.getTime() - 90 * 60000);
+    // ── Converge on leave time ─────────────────────────────────────────────────
+    // Anchor point depends on mode: with buffers → 50 min before flight;
+    // stripped → exactly at gate close (30 min before flight), no other padding.
+    const anchor = stripped
+      ? gateClose
+      : new Date(flight.getTime() - 50 * 60000 - 30 * 60000); // atGate − security
+
+    let leave = new Date(anchor.getTime() - 90 * 60000);
     for (let i = 0; i < 8; i++) {
       const { minutes } = trafficAt(leave);
-      leave = new Date(atAirport.getTime() - minutes * 60000);
+      leave = new Date(anchor.getTime() - minutes * 60000);
     }
     const { minutes: travelMin, label: trafLabel, level: trafLevel } = trafficAt(leave);
 
-    // ── Cab booking ────────────────────────────────────────────────────────────
-    const bookCab = new Date(leave.getTime() - 15 * 60000);
+    // ── Derived times (normal mode) ────────────────────────────────────────────
+    const atAirport = new Date(leave.getTime() + travelMin * 60000);
+    const atGate    = new Date(atAirport.getTime() + (stripped ? 0 : 30 * 60000));
+    const bookCab   = new Date(leave.getTime() - 15 * 60000);
 
-    // ── Render ─────────────────────────────────────────────────────────────────
-    const sameDayHint = leave.toDateString() !== flight.toDateString()
-      ? " (night before)" : "";
+    // ── Hero block ─────────────────────────────────────────────────────────────
+    const sameDayHint = leave.toDateString() !== flight.toDateString() ? " (night before)" : "";
+    const leaveBlock  = document.getElementById("leaveTime").closest(".leave-block");
+    leaveBlock.classList.toggle("stripped", stripped);
+
     document.getElementById("leaveTime").textContent = fmtTime(leave);
-    document.getElementById("leaveSub").textContent  =
-      `for your ${fmtTime(flight)} flight${sameDayHint}`;
+    document.getElementById("leaveSub").textContent  = stripped
+      ? `bare minimum for your ${fmtTime(flight)} flight${sameDayHint}`
+      : `for your ${fmtTime(flight)} flight${sameDayHint}`;
 
+    // ── Timeline rows ──────────────────────────────────────────────────────────
     const rows = [
       {
-        name:  "Book cab",
-        desc:  "15 min buffer for the cab to arrive",
-        time:  fmtTime(bookCab),
-        delta: "−15 min",
+        name:   "Book cab",
+        desc:   "15 min buffer for the cab to arrive",
+        time:   fmtTime(bookCab),
+        delta:  "−15 min",
+        ghost:  stripped,   // shown as struck-through when stripped
       },
       {
         name:      "Leave home",
@@ -370,17 +428,19 @@
         delta: `+${travelMin} min`,
         badge: { label: trafLabel, level: trafLevel },
       },
-      {
+      ...(!stripped ? [{
         name:  "Clear security",
         desc:  "check-in + security queue at BLR T1/T2",
         time:  fmtTime(atGate),
         delta: "+30 min",
-      },
+      }] : []),
       {
         name:  "Gate closes",
-        desc:  "30 min before departure — you arrive 20 min before this",
+        desc:  stripped
+          ? "arrive exactly here — no cushion"
+          : "30 min before departure — you arrive 20 min before this",
         time:  fmtTime(gateClose),
-        delta: "+20 min",
+        delta: stripped ? "+0 min" : "+20 min",
       },
       {
         name:  "Flight departs",
@@ -393,12 +453,10 @@
     const rowsEl = document.getElementById("rows");
     rowsEl.innerHTML = "";
     rows.forEach(r => {
-      const badgeHtml = r.badge
-        ? `<span class="pill ${r.badge.level}">${r.badge.label}</span>` : "";
-      const highlightHtml = r.highlight
-        ? `<span class="pill good">leave</span>` : "";
+      const badgeHtml     = r.badge     ? `<span class="pill ${r.badge.level}">${r.badge.label}</span>` : "";
+      const highlightHtml = r.highlight ? `<span class="pill good">leave</span>` : "";
       const div = document.createElement("div");
-      div.className = "row";
+      div.className = "row" + (r.ghost ? " ghost" : "");
       div.innerHTML = `
         <div>
           <div class="name">${r.name}${highlightHtml}${badgeHtml}</div>
@@ -409,6 +467,15 @@
       `;
       rowsEl.appendChild(div);
     });
+  }
+
+  function calculate() {
+    const errEl = document.getElementById("err");
+    errEl.textContent = "";
+    try { _flight = parseFlight(); } catch (e) { errEl.textContent = e.message; return; }
+
+    const stripped = document.getElementById("stripToggle").checked;
+    render(_flight, stripped);
 
     const mapsHref =
       `https://www.google.com/maps/dir/?api=1` +
@@ -420,6 +487,9 @@
   }
 
   document.getElementById("calc").addEventListener("click", calculate);
+  document.getElementById("stripToggle").addEventListener("change", () => {
+    if (_flight) render(_flight, document.getElementById("stripToggle").checked);
+  });
   ["hh", "mm", "ampm"].forEach(id =>
     document.getElementById(id).addEventListener("keydown", e => {
       if (e.key === "Enter") calculate();
