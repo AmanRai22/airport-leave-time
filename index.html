@@ -235,16 +235,63 @@
   /* rows that represent removed buffers */
   .row.ghost { opacity: .32; }
   .row.ghost .name { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.25); }
+
+  /* ── City segmented control ─────────────────────────────────────────── */
+  .seg {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+  .seg button {
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    border-radius: 7px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button.active {
+    background: linear-gradient(180deg, var(--accent), #4674e6);
+    color: white;
+    box-shadow: 0 2px 6px rgba(91,140,255,.25);
+  }
+  .seg button .sub {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    opacity: .8;
+    margin-top: 2px;
+  }
 </style>
 </head>
 <body>
   <div class="wrap">
     <header>
-      <h1>BLR Airport — Leave Time Calculator</h1>
-      <p>From DRXFIT (HSR), Bengaluru → Kempegowda Intl. Airport (BLR)</p>
+      <h1 id="appTitle">Airport Leave Time Calculator</h1>
+      <p id="appSubtitle">Choose your city, then enter your flight time.</p>
     </header>
 
     <div class="card">
+      <div class="seg" id="citySeg">
+        <button data-city="BLR" class="active">
+          Bengaluru
+          <span class="sub">HSR → BLR · ~40 km</span>
+        </button>
+        <button data-city="NAG">
+          Nagpur
+          <span class="sub">Midnight Inn → NAG · ~7 km</span>
+        </button>
+      </div>
+
       <label for="hh">Flight departure time</label>
       <div class="input-row">
         <input id="hh" class="hh" type="number" inputmode="numeric" min="1" max="12" placeholder="HH" />
@@ -281,8 +328,8 @@
           <summary>How this is calculated</summary>
           <ul>
             <li><b>Cab booking buffer:</b> 15 min — book before you want to leave so the cab is waiting, not you.</li>
-            <li><b>Travel time:</b> estimated for HSR → BLR via ORR → Hebbal → NH44 using a 30-minute-slot traffic model calibrated to typical Bengaluru weekday patterns. Crucially, the estimate uses the hour <em>you'll actually be on the road</em> — not when you opened the app — so an evening flight correctly gets peak-hour traffic even if you're planning in the morning.</li>
-            <li><b>Security:</b> 30 min covers check-in kiosk + security queue at BLR T1/T2.</li>
+            <li><b>Travel time:</b> estimated using a 30-minute-slot traffic model calibrated per city (Bengaluru: HSR → BLR via ORR/Hebbal/NH44; Nagpur: Midnight Inn → NAG via Wardha Road). Crucially, the estimate uses the hour <em>you'll actually be on the road</em> — not when you opened the app — so an evening flight correctly gets peak-hour traffic even if you're planning in the morning.</li>
+            <li><b>Security:</b> 30 min covers check-in kiosk + security queue (20 min in tight mode).</li>
             <li><b>Gate buffer:</b> gates close 30 min before departure; the app targets arrival 20 min before gate close → 50 min before flight total.</li>
           </ul>
         </details>
@@ -297,55 +344,74 @@
   </div>
 
 <script>
-  const HOME    = { lat: 12.9264946, lng: 77.6382594 };
-  const AIRPORT = { lat: 13.1986,    lng: 77.7066    };
+  // ── City profiles ──────────────────────────────────────────────────────────
+  // Each city: home + airport coords, route description, 48-slot travel-time
+  // curve in minutes (slot 0 = 00:00, 1 = 00:30, ... 47 = 23:30), and traffic
+  // band thresholds (light/moderate/heavy/peak) so the same UI logic works
+  // even though absolute durations are wildly different (BLR ~50–125 min,
+  // Nagpur ~12–28 min).
+  const CITIES = {
+    BLR: {
+      title:    "BLR Airport — Leave Time Calculator",
+      subtitle: "From DRXFIT (HSR), Bengaluru → Kempegowda Intl. Airport (BLR)",
+      home:     { lat: 12.9264946, lng: 77.6382594 },
+      airport:  { lat: 13.1986,    lng: 77.7066    },
+      placeName: "DRXFIT, HSR Layout",
+      airportName: "BLR T1/T2",
+      // HSR → BLR via ORR → Hebbal → NH44, calibrated to weekday patterns.
+      slots: [
+         50, 50,  50, 50,  50, 50,  50, 52,
+         54, 56,  59, 63,  66, 74,  82, 92,
+         97,102, 104,101,  96, 90,  86, 82,
+         80, 79,  78, 78,  80, 83,  88, 95,
+        103,111, 117,122, 124,121, 116,109,
+        101, 94,  88, 82,  76, 69,  63, 56,
+      ],
+      bands: { light: 58, moderate: 82, heavy: 100 }, // minutes
+      peakAM: [7.5, 10.5],
+      peakPM: [16,  20.5],
+    },
+    NAG: {
+      title:    "NAG Airport — Leave Time Calculator",
+      subtitle: "From Hotel Midnight Inn, Nagpur → Dr. B. R. Ambedkar Intl. (NAG)",
+      home:     { lat: 21.1113419, lng: 79.088102  },
+      airport:  { lat: 21.0901569, lng: 79.0548086 },
+      placeName: "Hotel Midnight Inn, Nagpur",
+      airportName: "NAG terminal",
+      // ~7 km via Wardha Road. Tier-2 city — much shorter, milder peaks.
+      slots: [
+        12, 12,  12, 12,  12, 12,  12, 12,
+        13, 13,  14, 14,  15, 16,  18, 20,
+        22, 23,  22, 21,  19, 18,  17, 16,
+        16, 16,  16, 17,  17, 17,  18, 19,
+        20, 22,  24, 26,  26, 25,  23, 21,
+        19, 17,  16, 15,  14, 13,  13, 12,
+      ],
+      bands: { light: 14, moderate: 18, heavy: 23 }, // minutes
+      peakAM: [7.5, 10],
+      peakPM: [16.5, 20],
+    },
+  };
 
-  // 48 slots of 30 min each — index 0 = 00:00, 1 = 00:30, ... 47 = 23:30
-  // HSR/Koramangala → BLR via Outer Ring Road → Hebbal → NH44.
-  // Calibrated against typical weekday patterns; accounts for building/easing of peak.
-  const SLOTS = [
-    50, 50,  // 00:00–00:30
-    50, 50,  // 01:00–01:30
-    50, 50,  // 02:00–02:30
-    50, 52,  // 03:00–03:30
-    54, 56,  // 04:00–04:30
-    59, 63,  // 05:00–05:30
-    66, 74,  // 06:00–06:30
-    82, 92,  // 07:00–07:30
-    97,102,  // 08:00–08:30
-   104,101,  // 09:00–09:30
-    96, 90,  // 10:00–10:30
-    86, 82,  // 11:00–11:30
-    80, 79,  // 12:00–12:30
-    78, 78,  // 13:00–13:30
-    80, 83,  // 14:00–14:30
-    88, 95,  // 15:00–15:30
-   103,111,  // 16:00–16:30
-   117,122,  // 17:00–17:30
-   124,121,  // 18:00–18:30
-   116,109,  // 19:00–19:30
-   101, 94,  // 20:00–20:30
-    88, 82,  // 21:00–21:30
-    76, 69,  // 22:00–22:30
-    63, 56,  // 23:00–23:30
-  ];
+  let currentCity = "BLR"; // default
 
-  function trafficAt(date) {
+  function trafficAt(date, cityKey = currentCity) {
+    const c = CITIES[cityKey];
     const h = date.getHours(), m = date.getMinutes();
     const si = h * 2 + (m >= 30 ? 1 : 0);
     const ni = (si + 1) % 48;
     const frac = (m % 30) / 30;
-    const minutes = Math.round(SLOTS[si] + (SLOTS[ni] - SLOTS[si]) * frac);
+    const minutes = Math.round(c.slots[si] + (c.slots[ni] - c.slots[si]) * frac);
 
-    // Named period takes priority; otherwise bucket by duration.
+    // Named period takes priority; otherwise bucket by city-specific bands.
     const t = h + m / 60;
     let label, level;
-    if      (t >= 7.5  && t < 10.5) { label = "Morning rush";   level = "warn"; }
-    else if (t >= 16   && t < 20.5) { label = "Evening peak";   level = "bad";  }
-    else if (minutes <= 58)          { label = "Light traffic";  level = "good"; }
-    else if (minutes <= 82)          { label = "Moderate";       level = "ok";   }
-    else if (minutes <= 100)         { label = "Heavy traffic";  level = "warn"; }
-    else                             { label = "Peak traffic";   level = "bad";  }
+    if      (t >= c.peakAM[0] && t < c.peakAM[1]) { label = "Morning rush";  level = "warn"; }
+    else if (t >= c.peakPM[0] && t < c.peakPM[1]) { label = "Evening peak";  level = "bad";  }
+    else if (minutes <= c.bands.light)            { label = "Light traffic"; level = "good"; }
+    else if (minutes <= c.bands.moderate)         { label = "Moderate";      level = "ok";   }
+    else if (minutes <= c.bands.heavy)            { label = "Heavy traffic"; level = "warn"; }
+    else                                          { label = "Peak traffic";  level = "bad";  }
 
     return { minutes, label, level };
   }
@@ -374,6 +440,7 @@
   let _flight = null; // cached so the toggle can re-render without re-parsing
 
   function render(flight, stripped) {
+    const city = CITIES[currentCity];
     // Variable durations — only these change between modes.
     const cabLeadMin  = stripped ? 5  : 15; // book-cab → leave-home gap
     const securityMin = stripped ? 20 : 30; // security queue buffer trimmed
@@ -420,7 +487,7 @@
       },
       {
         name:      "Leave home",
-        desc:      "DRXFIT, HSR Layout",
+        desc:      city.placeName,
         time:      fmtTime(leave),
         delta:     "—",
         highlight: true,
@@ -435,8 +502,8 @@
       {
         name:  "Through security",
         desc:  stripped
-          ? "tight: 20 min for check-in + security at BLR"
-          : "30 min for check-in + security queue at BLR T1/T2",
+          ? `tight: 20 min for check-in + security at ${city.airportName}`
+          : `30 min for check-in + security queue at ${city.airportName}`,
         time:  fmtTime(atGate),
         delta: `+${securityMin} min`,
         badge: stripped ? { label: "tight", level: "warn" } : null,
@@ -485,18 +552,44 @@
     const stripped = document.getElementById("stripToggle").checked;
     render(_flight, stripped);
 
+    const c = CITIES[currentCity];
     const mapsHref =
       `https://www.google.com/maps/dir/?api=1` +
-      `&origin=${HOME.lat},${HOME.lng}` +
-      `&destination=${AIRPORT.lat},${AIRPORT.lng}` +
+      `&origin=${c.home.lat},${c.home.lng}` +
+      `&destination=${c.airport.lat},${c.airport.lng}` +
       `&travelmode=driving`;
     document.getElementById("mapsLink").href = mapsHref;
     document.getElementById("result").classList.add("show");
   }
 
+  function setCity(key) {
+    if (!CITIES[key]) return;
+    currentCity = key;
+    const c = CITIES[key];
+    document.getElementById("appTitle").textContent    = c.title;
+    document.getElementById("appSubtitle").textContent = c.subtitle;
+    document.querySelectorAll("#citySeg button").forEach(b => {
+      b.classList.toggle("active", b.dataset.city === key);
+    });
+    // If we already have a result on screen, recompute for the new city.
+    if (_flight) {
+      const stripped = document.getElementById("stripToggle").checked;
+      render(_flight, stripped);
+      const mapsHref =
+        `https://www.google.com/maps/dir/?api=1` +
+        `&origin=${c.home.lat},${c.home.lng}` +
+        `&destination=${c.airport.lat},${c.airport.lng}` +
+        `&travelmode=driving`;
+      document.getElementById("mapsLink").href = mapsHref;
+    }
+  }
+
   document.getElementById("calc").addEventListener("click", calculate);
   document.getElementById("stripToggle").addEventListener("change", () => {
     if (_flight) render(_flight, document.getElementById("stripToggle").checked);
+  });
+  document.querySelectorAll("#citySeg button").forEach(b => {
+    b.addEventListener("click", () => setCity(b.dataset.city));
   });
   ["hh", "mm", "ampm"].forEach(id =>
     document.getElementById(id).addEventListener("keydown", e => {
@@ -504,6 +597,8 @@
     })
   );
 
+  // Initialize header for default city + sensible default time.
+  setCity(currentCity);
   document.getElementById("hh").value   = 6;
   document.getElementById("mm").value   = 30;
   document.getElementById("ampm").value = "AM";
